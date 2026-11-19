@@ -4,9 +4,27 @@ from pathlib import Path
 import pandas as pd
 from fastapi import APIRouter, UploadFile, File, HTTPException
 
+from backend.app.agents.data_agent import generate_insights
+
 router = APIRouter(prefix="/excel", tags=["Excel"])
 
 MAX_FILE_SIZE = 10 * 1024 * 1024
+
+
+def analyze_dataframe(df):
+    return {
+        "rows": int(len(df)),
+        "columns": int(len(df.columns)),
+        "column_names": [str(c) for c in df.columns],
+        "empty_cells": int(df.isna().sum().sum()),
+        "duplicate_rows": int(df.duplicated().sum()),
+        "data_types": {
+            str(c): str(t) for c, t in df.dtypes.items()
+        },
+        "insights": generate_insights(df),
+        "original_modified": False
+    }
+
 
 @router.post("/analyze")
 async def analyze_excel(file: UploadFile = File(...)):
@@ -35,27 +53,18 @@ async def analyze_excel(file: UploadFile = File(...)):
 
     try:
         if extension == ".xlsx":
-            workbook = pd.ExcelFile(BytesIO(content), engine="openpyxl")
+            workbook = pd.ExcelFile(
+                BytesIO(content), engine="openpyxl"
+            )
+
             sheets = {}
 
             for sheet_name in workbook.sheet_names:
                 df = pd.read_excel(
                     workbook,
-                    sheet_name=sheet_name,
-                    engine="openpyxl"
+                    sheet_name=sheet_name
                 )
-
-                sheets[sheet_name] = {
-                    "rows": int(len(df)),
-                    "columns": int(len(df.columns)),
-                    "column_names": [str(c) for c in df.columns],
-                    "empty_cells": int(df.isna().sum().sum()),
-                    "duplicate_rows": int(df.duplicated().sum()),
-                    "data_types": {
-                        str(c): str(t)
-                        for c, t in df.dtypes.items()
-                    }
-                }
+                sheets[sheet_name] = analyze_dataframe(df)
 
             return {
                 "status": "success",
@@ -64,21 +73,14 @@ async def analyze_excel(file: UploadFile = File(...)):
                 "original_modified": False
             }
 
-        df = pd.read_csv(BytesIO(content), encoding="utf-8-sig")
+        df = pd.read_csv(
+            BytesIO(content), encoding="utf-8-sig"
+        )
 
         return {
             "status": "success",
             "filename": filename,
-            "rows": int(len(df)),
-            "columns": int(len(df.columns)),
-            "column_names": [str(c) for c in df.columns],
-            "empty_cells": int(df.isna().sum().sum()),
-            "duplicate_rows": int(df.duplicated().sum()),
-            "data_types": {
-                str(c): str(t)
-                for c, t in df.dtypes.items()
-            },
-            "original_modified": False
+            **analyze_dataframe(df)
         }
 
     except Exception:
